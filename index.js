@@ -1,4 +1,5 @@
 const fs = require('fs')
+const path = require('path')
 
 const nodemailer = require('nodemailer')
 const request = require('request')
@@ -21,10 +22,11 @@ const opts = {
 const argv = require('yargs').options(opts).argv
 const type = argv.type
 
-if (!fs.existsSync('./config.js'))
+const config_path = path.join(__dirname, './config.js')
+if (!fs.existsSync(config_path))
   throw new Error('Setup a configuration file at config.js')
 
-const config = require('./config')
+const config = require(config_path)
 
 let transporter;
 if (config.email) {
