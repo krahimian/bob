@@ -2,6 +2,7 @@ const fs = require('fs')
 const path = require('path')
 
 const nodemailer = require('nodemailer')
+const async = require('async')
 const request = require('request')
 const Logger = require('logplease')
 const jsonfile = require('jsonfile')
@@ -9,7 +10,7 @@ const ChartjsNode = require('chartjs-node')
 const _ = require('lodash')
 const MACD = require('technicalindicators').MACD
 
-const opts = {
+const yargs_opts = {
   t: {
     alias: 'type',
     default: 'BTC',
@@ -19,7 +20,7 @@ const opts = {
   }
 }
 
-const argv = require('yargs').options(opts).argv
+const argv = require('yargs').options(yargs_opts).argv
 const type = argv.type
 
 const config_path = path.join(__dirname, './config.js')
@@ -61,31 +62,7 @@ function run () {
   const macd = new MACD(macdInput)
   const result = macd.getResult()
 
-  const chartNode = new ChartjsNode(1000, 1000)
-  const chartJsOptions = {
-    type: 'line',
-    data: {
-      labels: _.slice(saved_data.time_values, config.macd.slow_period - 1),
-      datasets: [{
-        label: 'MACD',
-        backgroundColor: 'rgba(200,200,200,0.2)',
-        borderColor: 'rgba(200,200,200,1)',
-	pointBackgroundColor: 'rgba(200,200,200,1)',
-	data: _.map(result, 'MACD')
-      },{
-        label: 'signal',
-        backgroundColor: 'rgba(151,187,205,0.2)',
-        borderColor: 'rgba(151,187,205,1)',
-        pointBackgroundColor: 'rgba(151,187,205,1)',
-	data: _.map(result, 'signal')
-      }]
-    },
-    options: {}
-  }
-  
-  chartNode.drawChart(chartJsOptions).then(() => {
-    return chartNode.writeImageToFile('image/png', chart_path)    
-  })
+  generateChart(result, saved_data.time_values)
 
   fetchData((err, data) => {
     if (err)
@@ -115,41 +92,68 @@ function run () {
     logger.debug('last macd:', current_macd)
     logger.debug('last histogram:', current_histogram)
 
-    new_close_values.forEach(value => {
+    async.eachOfSeries(new_close_values, (value, index, next) => {
+
+      const finish = () => {
+	current_macd = r.MACD
+	current_histogram = r.histogram
+	next()
+      }
+
       const r = macd.nextValue(value)
+
       if (r) {
 	logger.debug(r)
-	
+	result.push(r)
+
+	let email_msg
+
+	function sendEmail() {
+	  generateChart(result, saved_data.time_values.concat(new_time_values.slice(0, index))).then(() => {
+	    const email_opts = {
+	      subject: email_msg,
+	      html: '<img src="cid:chart@bob.com" />',
+	      attachments: [{
+		filename: 'chart.png',
+		path: chart_path,
+		cid: 'chart@bob.com'
+	      }]
+	    }
+	    transporter.sendMail(Object.assign(config.emailOptions, email_opts), finish)
+	  })
+	}
+
 	if (Math.sign(current_histogram) !== Math.sign(r.histogram)) {
 	  const msg = type + ' - Signal-line crossover: ' + r.histogram
 	  logger.info(msg)
-	  if (transporter) {
-	    transporter.sendMail(Object.assign(config.emailOptions, { subject: msg }))
-	  }
+
+	  if (transporter) email_msg = msg
 	}
 
 	if (Math.sign(current_macd) !== Math.sign(r.MACD)) {
 	  const msg = type + ' - Zero crossover: ' + r.MACD
 	  logger.info(msg)
-	  if (transporter) {
-	    transporter.sendMail(Object.assign(config.emailOptions, { subject: msg }))
-	  }	  
+
+	  if (transporter) email_msg += msg
 	}
-	
-	current_macd = r.MACD
-	current_histogram = r.histogram
+
+	if (email_msg)
+	  return sendEmail()
+
+	finish()
       }
+    }, () => {
+      const updated_data = {
+	timeTo: data.timeTo,
+	timeFrom: saved_data.timeFrom,
+	close_values: saved_data.close_values.concat(new_close_values),
+	time_values: saved_data.time_values.concat(new_time_values)
+      }
+
+      logger.debug('saving new data')
+      jsonfile.writeFileSync(data_path, updated_data, { spaces: 4 })
+
     })
-
-    const updated_data = {
-      timeTo: data.timeTo,
-      timeFrom: saved_data.timeFrom,
-      close_values: saved_data.close_values.concat(new_close_values),
-      time_values: saved_data.time_values.concat(new_time_values)
-    }
-
-    logger.debug('saving new data')
-    jsonfile.writeFileSync(data_path, updated_data, { spaces: 4 })
   })  
 }
 
@@ -191,6 +195,34 @@ function fetchData (cb) {
 
     cb(null, result)
     
+  })
+}
+
+function generateChart(data, time_values) {
+  const chartNode = new ChartjsNode(1000, 1000)
+  const chartJsOptions = {
+    type: 'line',
+    data: {
+      labels: _.slice(time_values, config.macd.slow_period - 1),
+      datasets: [{
+        label: 'MACD',
+        backgroundColor: 'rgba(200,200,200,0.2)',
+        borderColor: 'rgba(200,200,200,1)',
+	pointBackgroundColor: 'rgba(200,200,200,1)',
+	data: _.map(data, 'MACD')
+      },{
+        label: 'signal',
+        backgroundColor: 'rgba(151,187,205,0.2)',
+        borderColor: 'rgba(151,187,205,1)',
+        pointBackgroundColor: 'rgba(151,187,205,1)',
+	data: _.map(data, 'signal')
+      }]
+    },
+    options: {}
+  }
+
+  return chartNode.drawChart(chartJsOptions).then(() => {
+    return chartNode.writeImageToFile('image/png', chart_path)
   })
 }
 
