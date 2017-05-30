@@ -119,7 +119,7 @@ function run () {
 	logger.debug(r)
 	
 	if (Math.sign(current_histogram) !== Math.sign(r.histogram)) {
-	  const msg = 'Signal-line crossover: ' + r.histogram
+	  const msg = type + ' - Signal-line crossover: ' + r.histogram
 	  logger.info(msg)
 	  if (transporter) {
 	    transporter.sendMail(Object.assign(config.emailOptions, { subject: msg }))
@@ -127,7 +127,7 @@ function run () {
 	}
 
 	if (Math.sign(current_macd) !== Math.sign(r.MACD)) {
-	  const msg = 'Zero crossover: ' + r.MACD
+	  const msg = type + ' - Zero crossover: ' + r.MACD
 	  logger.info(msg)
 	  if (transporter) {
 	    transporter.sendMail(Object.assign(config.emailOptions, { subject: msg }))
