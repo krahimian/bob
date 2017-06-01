@@ -10,6 +10,7 @@
     "jsonfile": "^3.0.0",
     "lodash": "^4.17.4",
     "logplease": "^1.2.13",
+    "moment": "^2.18.1",
     "nodemailer": "^4.0.1",
     "request": "^2.81.0",
     "technicalindicators": "^1.0.1",

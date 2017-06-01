@@ -2,6 +2,7 @@ const fs = require('fs')
 const path = require('path')
 
 const nodemailer = require('nodemailer')
+const moment = require('moment')
 const async = require('async')
 const request = require('request')
 const Logger = require('logplease')
@@ -62,99 +63,100 @@ function run () {
   const macd = new MACD(macdInput)
   const result = macd.getResult()
 
-  generateChart(result, saved_data.time_values)
+  generateChart(result, saved_data.time_values).then(() => {
 
-  fetchData((err, data) => {
-    if (err)
-      throw err
+    fetchData((err, data) => {
+      if (err)
+	throw err
 
-    logger.debug('saved Time To:', saved_data.timeTo)
-    logger.debug('fetched Time To:', data.timeTo)
+      logger.debug('saved Time To:', saved_data.timeTo)
+      logger.debug('fetched Time To:', data.timeTo)
 
-    if (saved_data.timeTo == data.timeTo)
-      return logger.debug('no new data to process')
+      if (saved_data.timeTo == data.timeTo)
+	return logger.debug('no new data to process')
 
-    let new_close_values = []
-    let new_time_values = []
+      let new_close_values = []
+      let new_time_values = []
 
-    data.time_values.forEach((time, index) => {
-      if (time > saved_data.timeTo) {
-	new_close_values.push(data.close_values[index])
-	new_time_values.push(time)
-      }
+      data.time_values.forEach((time, index) => {
+	if (time > saved_data.timeTo) {
+	  new_close_values.push(data.close_values[index])
+	  new_time_values.push(time)
+	}
+      })
+
+      let current_signal = result[result.length - 1].signal
+      let current_macd = result[result.length - 1].MACD
+      let current_histogram = current_macd - current_signal
+
+      logger.debug('last signal:', current_signal)
+      logger.debug('last macd:', current_macd)
+      logger.debug('last histogram:', current_histogram)
+
+      async.eachOfSeries(new_close_values, (value, index, next) => {
+
+	const finish = () => {
+	  current_macd = r.MACD
+	  current_histogram = r.histogram
+	  next()
+	}
+
+	const r = macd.nextValue(value)
+
+	if (r) {
+	  logger.debug(r)
+	  result.push(r)
+
+	  let email_msg
+
+	  function sendEmail() {
+	    generateChart(result, saved_data.time_values.concat(new_time_values.slice(0, index))).then(() => {
+	      const email_opts = {
+		subject: email_msg,
+		html: '<img src="cid:chart@bob.com" />',
+		attachments: [{
+		  filename: 'chart.png',
+		  path: chart_path,
+		  cid: 'chart@bob.com'
+		}]
+	      }
+	      transporter.sendMail(Object.assign(config.emailOptions, email_opts), finish)
+	    })
+	  }
+
+	  if (Math.sign(current_histogram) !== Math.sign(r.histogram)) {
+	    const msg = type + ' - Signal-line crossover: ' + r.histogram
+	    logger.info(msg)
+
+	    if (transporter) email_msg = msg
+	  }
+
+	  if (Math.sign(current_macd) !== Math.sign(r.MACD)) {
+	    const msg = type + ' - Zero crossover: ' + r.MACD
+	    logger.info(msg)
+
+	    if (transporter) email_msg += msg
+	  }
+
+	  if (email_msg)
+	    return sendEmail()
+
+	  finish()
+	}
+      }, () => {
+
+	const updated_data = {
+	  timeTo: data.timeTo,
+	  close_values: saved_data.close_values.concat(new_close_values).splice(-1 * config.macd.slow_period * 5),
+	  time_values: saved_data.time_values.concat(new_time_values).splice(-1 * config.macd.slow_period * 5)
+	}
+
+	logger.debug('saving new data')
+	jsonfile.writeFileSync(data_path, updated_data, { spaces: 4 })
+
+      })
     })
-
-    let current_signal = result[result.length - 1].signal
-    let current_macd = result[result.length - 1].MACD
-    let current_histogram = current_macd - current_signal
-
-    logger.debug('last signal:', current_signal)
-    logger.debug('last macd:', current_macd)
-    logger.debug('last histogram:', current_histogram)
-
-    async.eachOfSeries(new_close_values, (value, index, next) => {
-
-      const finish = () => {
-	current_macd = r.MACD
-	current_histogram = r.histogram
-	next()
-      }
-
-      const r = macd.nextValue(value)
-
-      if (r) {
-	logger.debug(r)
-	result.push(r)
-
-	let email_msg
-
-	function sendEmail() {
-	  generateChart(result, saved_data.time_values.concat(new_time_values.slice(0, index))).then(() => {
-	    const email_opts = {
-	      subject: email_msg,
-	      html: '<img src="cid:chart@bob.com" />',
-	      attachments: [{
-		filename: 'chart.png',
-		path: chart_path,
-		cid: 'chart@bob.com'
-	      }]
-	    }
-	    transporter.sendMail(Object.assign(config.emailOptions, email_opts), finish)
-	  })
-	}
-
-	if (Math.sign(current_histogram) !== Math.sign(r.histogram)) {
-	  const msg = type + ' - Signal-line crossover: ' + r.histogram
-	  logger.info(msg)
-
-	  if (transporter) email_msg = msg
-	}
-
-	if (Math.sign(current_macd) !== Math.sign(r.MACD)) {
-	  const msg = type + ' - Zero crossover: ' + r.MACD
-	  logger.info(msg)
-
-	  if (transporter) email_msg += msg
-	}
-
-	if (email_msg)
-	  return sendEmail()
-
-	finish()
-      }
-    }, () => {
-      const updated_data = {
-	timeTo: data.timeTo,
-	timeFrom: saved_data.timeFrom,
-	close_values: saved_data.close_values.concat(new_close_values),
-	time_values: saved_data.time_values.concat(new_time_values)
-      }
-
-      logger.debug('saving new data')
-      jsonfile.writeFileSync(data_path, updated_data, { spaces: 4 })
-
-    })
-  })  
+  })
 }
 
 function setup () {
@@ -187,7 +189,6 @@ function fetchData (cb) {
     let time_values = _.map(data.Data, 'time')
 
     const result = {
-      timeFrom: data.TimeFrom,
       timeTo: data.TimeTo,
       close_values: close_values,
       time_values: time_values
@@ -199,11 +200,16 @@ function fetchData (cb) {
 }
 
 function generateChart(data, time_values) {
+  let labels = _.slice(time_values, config.macd.slow_period -1)
+  labels = _.map(labels, (value) => {
+    return moment.unix(value).format('HH[h] - M/D')
+  })
+  console.log(labels)
   const chartNode = new ChartjsNode(1000, 1000)
   const chartJsOptions = {
     type: 'line',
     data: {
-      labels: _.slice(time_values, config.macd.slow_period - 1),
+      labels: labels,
       datasets: [{
         label: 'MACD',
         backgroundColor: 'rgba(200,200,200,0.2)',
