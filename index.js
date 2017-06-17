@@ -212,19 +212,23 @@ function generateChart(data, time_values) {
       labels: labels,
       datasets: [{
         label: 'MACD',
-        backgroundColor: 'rgba(200,200,200,0.2)',
-        borderColor: 'rgba(200,200,200,1)',
-	pointBackgroundColor: 'rgba(200,200,200,1)',
+        borderColor: 'rgba(233,142,57,1)',
+	fill: false,
 	data: _.map(data, 'MACD')
       },{
         label: 'signal',
-        backgroundColor: 'rgba(151,187,205,0.2)',
-        borderColor: 'rgba(151,187,205,1)',
-        pointBackgroundColor: 'rgba(151,187,205,1)',
+        borderColor: 'rgba(127,139,158,1)',
+	fill: false,
 	data: _.map(data, 'signal')
       }]
     },
-    options: {}
+    options: {
+      elements: {
+	point: {
+	  radius: 0
+	}
+      }
+    }
   }
 
   return chartNode.drawChart(chartJsOptions).then(() => {
