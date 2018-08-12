@@ -10,6 +10,7 @@ const jsonfile = require('jsonfile')
 const ChartjsNode = require('chartjs-node')
 const _ = require('lodash')
 const MACD = require('technicalindicators').MACD
+const EMA = require('technicalindicators').EMA
 
 const yargs_opts = {
   t: {
@@ -52,18 +53,39 @@ function run () {
   logger.debug('loading saved data')
   let saved_data = jsonfile.readFileSync(data_path)
 
-  const macdInput = {
+  logger.debug('building MACD')
+
+  // MACD
+  const macd = new MACD({
     values: saved_data.close_values,
     fastPeriod: config.macd.fast_period,
     slowPeriod: config.macd.slow_period,
     signalPeriod: config.macd.signal_period
-  }
+  })
+  const macd_result = macd.getResult()
 
-  logger.debug('building MACD')
-  const macd = new MACD(macdInput)
-  const result = macd.getResult()
+  // EMA LONG
+  const ema_long = new EMA({
+    values: saved_data.close_values,
+    period: config.macd.slow_period
+  })
+  const ema_long_result = ema_long.getResult()
 
-  generateChart(result, saved_data.time_values).then(() => {
+  // EMA SHORT
+  const ema_short = new EMA({
+    values: saved_data.close_values,
+    period: config.macd.fast_period
+  })
+  const ema_short_result = ema_short.getResult()
+
+  logger.debug('Macd results length:', macd_result.length)
+  logger.debug('Data length:', saved_data.close_values.length)
+
+  generateChart({
+    macd: macd_result,
+    ema_short: ema_short_result,
+    ema_long: ema_long_result
+  }, saved_data.time_values).then(() => {
 
     fetchData((err, data) => {
       if (err)
@@ -85,8 +107,8 @@ function run () {
 	}
       })
 
-      let current_signal = result[result.length - 1].signal
-      let current_macd = result[result.length - 1].MACD
+      let current_signal = macd_result[macd_result.length - 1].signal
+      let current_macd = macd_result[macd_result.length - 1].MACD
       let current_histogram = current_macd - current_signal
 
       logger.debug('last signal:', current_signal)
@@ -105,12 +127,12 @@ function run () {
 
 	if (r) {
 	  logger.debug(r)
-	  result.push(r)
+	  macd_result.push(r)
 
 	  let email_msg
 
 	  function sendEmail() {
-	    generateChart(result, saved_data.time_values.concat(new_time_values.slice(0, index))).then(() => {
+	    generateChart(macd_result, saved_data.time_values.concat(new_time_values.slice(0, index))).then(() => {
 	      const email_opts = {
 		subject: email_msg,
 		html: '<img src="cid:chart@bob.com" />',
@@ -147,8 +169,8 @@ function run () {
 
 	const updated_data = {
 	  timeTo: data.timeTo,
-	  close_values: saved_data.close_values.concat(new_close_values).splice(-1 * config.macd.slow_period * 5),
-	  time_values: saved_data.time_values.concat(new_time_values).splice(-1 * config.macd.slow_period * 5)
+	  close_values: saved_data.close_values.concat(new_close_values),
+	  time_values: saved_data.time_values.concat(new_time_values),
 	}
 
 	logger.debug('saving new data')
@@ -204,7 +226,6 @@ function generateChart(data, time_values) {
   labels = _.map(labels, (value) => {
     return moment.unix(value).format('HH[h] - M/D')
   })
-  console.log(labels)
   const chartNode = new ChartjsNode(1000, 1000)
   const chartJsOptions = {
     type: 'line',
@@ -214,12 +235,12 @@ function generateChart(data, time_values) {
         label: 'MACD',
         borderColor: 'rgba(233,142,57,1)',
 	fill: false,
-	data: _.map(data, 'MACD')
+	data: _.map(data.macd, 'MACD')
       },{
         label: 'signal',
         borderColor: 'rgba(127,139,158,1)',
 	fill: false,
-	data: _.map(data, 'signal')
+	data: _.map(data.macd, 'signal')
       }]
     },
     options: {
